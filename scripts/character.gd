@@ -434,7 +434,9 @@ func _release_scrap() -> void:
         var gun := equipped_gun
         equipped_gun = null
         pending_gun = null
-        gun_pickup_grace = 1.2
+        # The thrown gun has its own anti-recatch delay. Other ground guns
+        # should be collectable as soon as the throw animation finishes.
+        gun_pickup_grace = 0.0
         gun.launch(gun.global_position, throw_direction, velocity)
         return
     if carried_scrap == null:
