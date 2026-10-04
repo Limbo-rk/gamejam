@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://d0rlh7cbyyn6m"]
+
+[ext_resource type="PackedScene" uid="uid://2aviuamubfs6" path="res://GameJAM/FBX/scrap jam.fbx" id="1_c7s6e"]
+
+[node name="scrap jam" unique_id=1930329080 instance=ExtResource("1_c7s6e")]
+
+[node name="Cube_003" parent="." index="0" unique_id=1137319290]
+transform = Transform3D(694.3789, 0, 0, 0, 119.8833, 0, 0, 0, 694.3789, 9.948196, -23.407118, 7.208868)

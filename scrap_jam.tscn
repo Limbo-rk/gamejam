@@ -1,0 +1,5 @@
+[gd_scene format=3 uid="uid://dkoletml5rbba"]
+
+[ext_resource type="PackedScene" path="res://node_3d.tscn" id="1_map"]
+
+[node name="Map" instance=ExtResource("1_map")]

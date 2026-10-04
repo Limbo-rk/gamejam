@@ -1,0 +1,17 @@
+[gd_scene format=3 uid="uid://kymlty2wwrpc"]
+
+[ext_resource type="PackedScene" path="res://GameJAM/FBX/scrap jam.fbx" id="1_map"]
+[ext_resource type="Script" path="res://scripts/elevator.gd" id="2_elevator"]
+[ext_resource type="AnimationLibrary" path="res://GameJAM/Map/elevator_animations.tres" id="3_animations"]
+
+[node name="Map" type="Node3D"]
+script = ExtResource("2_elevator")
+
+[node name="scrap jam" parent="." instance=ExtResource("1_map")]
+position = Vector3(-0.08826494, -0.0000001192, -0.26544142)
+
+[node name="ElevatorAnimation" type="AnimationPlayer" parent="."]
+root_node = NodePath("../scrap jam")
+libraries = {
+&"": ExtResource("3_animations")
+}

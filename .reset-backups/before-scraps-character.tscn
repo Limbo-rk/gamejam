@@ -1,0 +1,24 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="PackedScene" path="res://GameJAM/Character/CharacterRig.glb" id="1_model"]
+[ext_resource type="Script" path="res://scripts/character.gd" id="2_script"]
+
+[sub_resource type="CapsuleShape3D" id="Capsule"]
+radius = 0.32
+height = 1.8
+
+[node name="Character" type="CharacterBody3D" groups=["characters"]]
+collision_layer = 2
+collision_mask = 3
+floor_snap_length = 0.5
+floor_max_angle = 0.837758
+script = ExtResource("2_script")
+
+[node name="BodyCollision" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.9, 0)
+shape = SubResource("Capsule")
+
+[node name="CharacterModel" parent="." instance=ExtResource("1_model")]
+position = Vector3(0, 0.07, 0)
+rotation = Vector3(0, 3.14159265, 0)
+scale = Vector3(0.64, 0.64, 0.64)
