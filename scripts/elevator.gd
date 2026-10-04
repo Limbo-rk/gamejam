@@ -33,6 +33,7 @@ func _ready() -> void:
 	scrap_exchange.name = "ScrapExchange"
 	scrap_exchange.platform = platform_mesh
 	add_child(scrap_exchange)
+	add_child(preload("res://scripts/npc_scavenging.gd").new())
 	await get_tree().create_timer(start_delay, false).timeout
 	elevator_animation.play("ElevatorRise")
 	await elevator_animation.animation_finished

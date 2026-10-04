@@ -10,6 +10,11 @@ var floor_offset := 0.0
 var deposit_area: Area3D
 var status: Label
 var player: Node3D
+var crosshair: Label
+var intro: Label
+var controls: Label
+var scrap_counter: Label
+var outcome: Label
 
 func _ready() -> void:
     add_to_group("scrap_exchange")
@@ -34,23 +39,65 @@ func _ready() -> void:
     var hud := CanvasLayer.new()
     hud.name = "PlatformStatus"
     add_child(hud)
-    status = Label.new()
-    hud.add_child(status)
-    status.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-    status.offset_top = -52
-    status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-    status.add_theme_color_override("font_shadow_color", Color.BLACK)
-    status.add_theme_constant_override("shadow_offset_x", 2)
-    status.add_theme_constant_override("shadow_offset_y", 2)
+    var layout := Control.new()
+    layout.name = "HUD"
+    hud.add_child(layout)
+    layout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    layout.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    intro = _hud_label(layout, "SpawnInstructions", 32)
+    intro.text = "Throw 3 Scraps on the Platform to Get Weapons"
+    intro.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+    intro.offset_left = 24
+    intro.offset_right = -24
+    intro.offset_top = 32
+    intro.offset_bottom = 130
+    intro.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    get_tree().create_timer(8.0).timeout.connect(intro.hide)
+    controls = _hud_label(layout, "Controls", 18)
+    controls.text = "Shift= Run\nQ= Throw\nLeft Click= Shoot"
+    controls.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+    controls.offset_left = 24
+    controls.offset_right = 260
+    controls.offset_top = -110
+    controls.offset_bottom = -24
+    scrap_counter = _hud_label(layout, "ScrapCounter", 24)
+    scrap_counter.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT)
+    scrap_counter.offset_left = -240
+    scrap_counter.offset_right = -24
+    scrap_counter.offset_top = -24
+    scrap_counter.offset_bottom = 24
+    scrap_counter.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    outcome = _hud_label(layout, "Outcome", 42)
+    outcome.anchor_right = 1.0
+    outcome.anchor_top = 0.5
+    outcome.anchor_bottom = 0.5
+    outcome.offset_left = 24
+    outcome.offset_right = -24
+    outcome.offset_top = -64
+    outcome.offset_bottom = 64
+    outcome.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    outcome.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+    outcome.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    status = _hud_label(layout, "PlayerStatus", 18)
+    status.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+    status.offset_left = -480
+    status.offset_right = -24
+    status.offset_top = -85
+    status.offset_bottom = -24
+    status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+    crosshair = _hud_label(layout, "Crosshair", 24)
+    crosshair.text = "+"
+    crosshair.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+    crosshair.position -= Vector2(6, 12)
     _update_status()
 
 func _physics_process(_delta: float) -> void:
     global_position = platform.global_position + Vector3.UP * floor_offset
-    if not active:
-        return
-    for item in deposit_area.get_overlapping_bodies():
-        if item.has_method("consume_for_platform") and item.linear_velocity.y <= 0.5:
-            accept_scrap(item)
+    if active:
+        for item in deposit_area.get_overlapping_bodies():
+            if item.has_method("consume_for_platform") and item.linear_velocity.y <= 0.5:
+                accept_scrap(item)
     _update_status()
 
 func accept_scrap(item: RigidBody3D) -> bool:
@@ -63,6 +110,7 @@ func accept_scrap(item: RigidBody3D) -> bool:
     var progress: int = deposits.get(id, 0) + 1
     deposits[id] = progress % 3
     scrap_received.emit(contributor, deposits[id])
+    _update_status()
     if progress >= 3:
         _eject_gun.call_deferred(contributor)
     return true
@@ -107,9 +155,30 @@ func get_throw_target(character: Node3D) -> Vector3:
 func _update_status() -> void:
     if not is_instance_valid(player):
         return
+    var living := 0
+    for actor in get_tree().get_nodes_in_group("characters"):
+        if not actor.dead:
+            living += 1
+    var ended: bool = player.dead or living == 1
+    crosshair.visible = not ended and player.equipped_gun != null
+    scrap_counter.text = "Scraps: %d/3" % int(deposits.get(player.get_instance_id(), 0))
+    outcome.visible = ended
+    if ended:
+        intro.hide()
+        outcome.text = "You Died" if player.dead else "You Were The Last One Standing"
+    status.text = "Health: %d/3  |  Remaining: %d" % [player.health, living]
     if player.equipped_gun != null:
-        status.text = "Gun equipped"
+        status.text = "Ammo: %d/20\n" % player.equipped_gun.ammo + status.text
     elif is_instance_valid(player.pending_gun) and player.pending_gun.equipped_by == null:
-        status.text = "Gun ready — walk over it to equip"
-    else:
-        status.text = "Platform: %d/3 scraps — throw scraps onto the platform" % int(deposits.get(player.get_instance_id(), 0))
+        status.text = "Walk over your gun to equip it\n" + status.text
+
+func _hud_label(parent: Control, label_name: String, font_size: int) -> Label:
+    var label := Label.new()
+    label.name = label_name
+    label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+    parent.add_child(label)
+    label.add_theme_font_size_override("font_size", font_size)
+    label.add_theme_color_override("font_shadow_color", Color.BLACK)
+    label.add_theme_constant_override("shadow_offset_x", 2)
+    label.add_theme_constant_override("shadow_offset_y", 2)
+    return label

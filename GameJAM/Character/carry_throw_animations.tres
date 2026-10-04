@@ -1,4 +1,4 @@
-[gd_resource type="AnimationLibrary" format=3]
+[gd_resource type="AnimationLibrary" format=3 uid="uid://bbpcnoixmsf5m"]
 
 [sub_resource type="Animation" id="Animation_ju63c"]
 resource_name = "Hands up"

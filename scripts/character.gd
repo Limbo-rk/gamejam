@@ -30,6 +30,22 @@ var throw_elapsed := 0.0
 var throw_released := false
 var throw_direction := Vector3.FORWARD
 var pickup_grace := 0.0
+var scrap_target: Node3D
+var avoided_scraps: Dictionary = {}
+var search_delay := 0.0
+var delivery_wait := 0.0
+var route_points := PackedVector3Array()
+var route_index := 0
+var route_destination := Vector3.INF
+var route_refresh := 0.0
+var progress_position := Vector3.ZERO
+var progress_time := 0.0
+var health := 3
+var dead := false
+var fire_requested := false
+var gun_pickup_grace := 0.0
+var combat: Node
+signal died(character: Node3D, killer: Node3D)
 @export_range(0.0, 1.0) var throw_release_fraction: float = 0.68
 @export_range(0.0, 0.5, 0.01) var carry_height_offset: float = 0.20
 @onready var skeleton: Skeleton3D = $CharacterModel/Armature/Skeleton3D
@@ -61,6 +77,10 @@ func _ready() -> void:
     carry_animation.add_animation_library("", preload("res://GameJAM/Character/carry_throw_animations.tres"))
     carry_animation.active = false
     skeleton.skeleton_updated.connect(_update_hand_socket)
+    if not player_controlled:
+        combat = preload("res://scripts/npc_combat.gd").new()
+        combat.actor = self
+        add_child(combat)
     if player_controlled:
         Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
         var arm: SpringArm3D = $CameraPivot/SpringArm3D
@@ -101,7 +121,11 @@ func _input(event: InputEvent) -> void:
         if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
             capture_requested = true
             Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-        elif carried_scrap != null and not throwing:
+        elif not dead and equipped_gun != null:
+            fire_requested = true
+        get_viewport().set_input_as_handled()
+    elif event.is_action_pressed("throw_item") and not event.is_echo():
+        if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
             begin_throw()
         get_viewport().set_input_as_handled()
     elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -121,6 +145,8 @@ func release_from_elevator(center: Vector3) -> void:
     home = center
     released = true
     leaving_elevator = true
+    running = true
+    change_timer = rng.randf_range(6.0, 10.0)
     # The east rim meets the terrain; the other sides rise above the floor.
     exit_target = center + Vector3(20, 0, float(wander_seed % 7 - 3) * 1.7)
     _pick_target()
@@ -136,6 +162,17 @@ func _pick_target() -> void:
         var exchange := get_tree().get_first_node_in_group("scrap_exchange")
         if exchange != null and exchange.active:
             target = exchange.get_dropoff_point(self)
+    elif not player_controlled and equipped_gun == null:
+        var scavenging := get_tree().get_first_node_in_group("scavenging")
+        if scavenging == null or delivery_wait > 0:
+            target = global_position
+            return
+        if not is_instance_valid(scrap_target) or not scavenging.available(scrap_target):
+            scrap_target = null
+            if search_delay <= 0:
+                scrap_target = scavenging.choose_scrap(self)
+                search_delay = 1.0
+        target = scrap_target.global_position if is_instance_valid(scrap_target) else global_position
     else:
         var space := get_world_3d().direct_space_state
         for attempt in 16:
@@ -150,7 +187,21 @@ func _pick_target() -> void:
         target = home
 
 func _physics_process(delta: float) -> void:
+    if dead:
+        return
+    gun_pickup_grace = maxf(0.0, gun_pickup_grace - delta)
+    if player_controlled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and equipped_gun != null:
+        if fire_requested or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+            _shoot_from_camera()
+    fire_requested = false
     pickup_grace = maxf(0.0, pickup_grace - delta)
+    search_delay = maxf(0.0, search_delay - delta)
+    delivery_wait = maxf(0.0, delivery_wait - delta)
+    route_refresh -= delta
+    for id in avoided_scraps.keys():
+        avoided_scraps[id] -= delta
+        if avoided_scraps[id] <= 0:
+            avoided_scraps.erase(id)
     if throwing:
         throw_elapsed += delta
         var duration := animation.get_animation("Throw").length
@@ -164,13 +215,20 @@ func _physics_process(delta: float) -> void:
         direction = camera_pivot.global_basis * Vector3(axes.x, 0, axes.y)
         running = Input.is_action_pressed("sprint")
     elif not player_controlled:
-        if released and not leaving_elevator and (carried_scrap != null or is_instance_valid(pending_gun)):
+        var fighting: bool = combat.update(delta)
+        if not fighting and released and not leaving_elevator and (equipped_gun == null or equipped_gun.ammo <= 0):
             _pick_target()
         change_timer -= delta
         if change_timer <= 0:
-            running = not running
-            change_timer = rng.randf_range(3.0, 7.0)
-            _pick_target()
+            if released and equipped_gun == null:
+                # Objective runs dominate; short walking intervals retain both supplied clips.
+                running = not running
+                change_timer = rng.randf_range(7.0, 12.0) if running else rng.randf_range(0.5, 1.0)
+            else:
+                running = not running
+                change_timer = rng.randf_range(3.0, 7.0)
+            if not fighting:
+                _pick_target()
         direction = target - global_position
         direction.y = 0
         if direction.length() < 0.7:
@@ -180,13 +238,16 @@ func _physics_process(delta: float) -> void:
             if leaving_elevator:
                 leaving_elevator = false
                 home = global_position
-            _pick_target()
+            if not fighting:
+                _pick_target()
             direction = target - global_position
             direction.y = 0
+        if released and not leaving_elevator and direction.length() > 0.7:
+            direction = _route_direction(direction)
         direction = direction.normalized()
         var separation := Vector3.ZERO
         for other in get_tree().get_nodes_in_group("characters"):
-            if other == self:
+            if other == self or other.dead:
                 continue
             var away: Vector3 = global_position - other.global_position
             away.y = 0
@@ -198,7 +259,7 @@ func _physics_process(delta: float) -> void:
     if throwing:
         direction = Vector3.ZERO
     var speed := run_speed if running else walk_speed
-    if not player_controlled:
+    if not player_controlled and not released:
         speed *= 0.55
     velocity.x = move_toward(velocity.x, direction.x * speed, 18 * delta)
     velocity.z = move_toward(velocity.z, direction.z * speed, 18 * delta)
@@ -219,6 +280,38 @@ func _physics_process(delta: float) -> void:
         if stuck_time > 0.8:
             _pick_target()
             stuck_time = 0.0
+        if released and not leaving_elevator and not throwing:
+            progress_time += delta
+            if global_position.distance_to(progress_position) > 1.5:
+                progress_position = global_position
+                progress_time = 0.0
+            elif progress_time > 8.0:
+                if is_instance_valid(scrap_target):
+                    avoided_scraps[scrap_target.get_instance_id()] = 30.0
+                    scrap_target = null
+                    var scavenging := get_tree().get_first_node_in_group("scavenging")
+                    if scavenging != null:
+                        scavenging.release_target(self)
+                route_refresh = 0.0
+                progress_time = 0.0
+                _pick_target()
+
+func _route_direction(fallback: Vector3) -> Vector3:
+    var scavenging := get_tree().get_first_node_in_group("scavenging")
+    if scavenging == null:
+        return fallback
+    if route_refresh <= 0 or route_destination.distance_to(target) > 1.0:
+        route_points = scavenging.route(global_position, target)
+        route_destination = target
+        route_index = 0
+        route_refresh = 2.0
+    while route_index < route_points.size():
+        var direction := route_points[route_index] - global_position
+        direction.y = 0
+        if direction.length() > 0.55:
+            return direction
+        route_index += 1
+    return fallback
 
 func _step_up(direction: Vector3, delta: float) -> void:
     if not is_on_floor() or direction.length_squared() < 0.01:
@@ -257,9 +350,20 @@ func _animate(moving: bool, sprinting: bool) -> void:
         animation.pause()
 
 func try_pickup_scrap(scrap: RigidBody3D) -> bool:
+    if dead:
+        return false
+    if not player_controlled:
+        if delivery_wait > 0 or (is_instance_valid(pending_gun) and pending_gun.equipped_by == null):
+            return false
+        if is_instance_valid(scrap_target) and scrap_target != scrap:
+            return false
     if equipped_gun != null or carried_scrap != null or throwing or pickup_grace > 0 or not scrap.claim(self):
         return false
     carried_scrap = scrap
+    scrap_target = null
+    var scavenging := get_tree().get_first_node_in_group("scavenging")
+    if scavenging != null:
+        scavenging.release_target(self)
     carry_animation.active = true
     carry_animation.play("Hands up")
     carry_animation.advance(0.0)
@@ -267,9 +371,20 @@ func try_pickup_scrap(scrap: RigidBody3D) -> bool:
     return true
 
 func try_equip_gun(gun: RigidBody3D) -> bool:
-    if equipped_gun != null or carried_scrap != null or throwing or not gun.claim(self):
+    if dead or gun_pickup_grace > 0 or carried_scrap != null or throwing:
         return false
+    if equipped_gun != null and equipped_gun.ammo >= gun.ammo:
+        return false
+    if not gun.claim(self):
+        return false
+    if equipped_gun != null:
+        equipped_gun.drop(global_position + Vector3.UP, velocity)
     equipped_gun = gun
+    gun_pickup_grace = 0.8
+    scrap_target = null
+    var scavenging := get_tree().get_first_node_in_group("scavenging")
+    if scavenging != null:
+        scavenging.release_target(self)
     pending_gun = null
     carry_animation.stop()
     carry_animation.active = false
@@ -297,7 +412,7 @@ func _update_hand_socket() -> void:
         gun_socket.global_transform = Transform3D((wrist.basis * orientation).orthonormalized(), wrist.origin + wrist.basis.y.normalized() * 0.08)
 
 func begin_throw(aim_direction: Vector3 = Vector3.ZERO) -> void:
-    if carried_scrap == null or throwing:
+    if dead or (carried_scrap == null and equipped_gun == null) or throwing:
         return
     throwing = true
     throw_elapsed = 0.0
@@ -314,13 +429,74 @@ func begin_throw(aim_direction: Vector3 = Vector3.ZERO) -> void:
 
 func _release_scrap() -> void:
     throw_released = true
+    if carried_scrap == null and equipped_gun != null:
+        _update_hand_socket()
+        var gun := equipped_gun
+        equipped_gun = null
+        pending_gun = null
+        gun_pickup_grace = 1.2
+        gun.launch(gun.global_position, throw_direction, velocity)
+        return
     if carried_scrap == null:
         return
     _update_hand_socket()
     var scrap := carried_scrap
     carried_scrap = null
     pickup_grace = 0.8
+    delivery_wait = 2.5
     scrap.launch(throw_direction, velocity)
+
+func _shoot_from_camera() -> void:
+    if dead or throwing or equipped_gun == null:
+        return
+    var camera: Camera3D = $CameraPivot/SpringArm3D/Camera3D
+    var direction := -camera.global_basis.z
+    var endpoint := camera.global_position + direction * 150.0
+    var query := PhysicsRayQueryParameters3D.create(camera.global_position, endpoint, 3, [get_rid()])
+    var hit := get_world_3d().direct_space_state.intersect_ray(query)
+    if not hit.is_empty():
+        endpoint = hit.position
+    model.rotation.y = atan2(direction.x, direction.z)
+    _update_hand_socket()
+    equipped_gun.fire_at(endpoint)
+
+func take_bullet(shooter: Node3D) -> void:
+    if dead or shooter == self:
+        return
+    health = maxi(0, health - 1)
+    if health > 0:
+        return
+    dead = true
+    fire_requested = false
+    throwing = false
+    animation.pause()
+    carry_animation.stop()
+    carry_animation.active = false
+    model.hide()
+    set_deferred("collision_layer", 0)
+    set_deferred("collision_mask", 0)
+    set_physics_process(false)
+    var scavenging := get_tree().get_first_node_in_group("scavenging")
+    if scavenging != null:
+        scavenging.release_target(self)
+    scrap_target = null
+    if equipped_gun != null:
+        equipped_gun.drop(global_position + Vector3.UP, velocity)
+        equipped_gun = null
+    if carried_scrap != null:
+        _drop_scrap_on_death.call_deferred()
+    if player_controlled:
+        capture_requested = false
+        Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+    died.emit(self, shooter)
+
+func _drop_scrap_on_death() -> void:
+    if carried_scrap == null:
+        return
+    var scrap := carried_scrap
+    carried_scrap = null
+    scrap.launch(Vector3.ZERO, Vector3.ZERO)
+    scrap.last_thrower = null
 
 func _notification(what: int) -> void:
     if not player_controlled:
