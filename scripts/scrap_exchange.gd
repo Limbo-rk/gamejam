@@ -1,5 +1,6 @@
 extends Node3D
 
+const SCRAPS_PER_WEAPON := 2
 signal scrap_received(character: Node3D, progress: int)
 signal gun_rewarded(character: Node3D, gun: RigidBody3D)
 var platform: MeshInstance3D
@@ -45,7 +46,7 @@ func _ready() -> void:
     layout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     layout.mouse_filter = Control.MOUSE_FILTER_IGNORE
     intro = _hud_label(layout, "SpawnInstructions", 32)
-    intro.text = "Throw 3 Scraps on the Platform to Get Weapons"
+    intro.text = "Throw %d Scraps on the Platform to Get Weapons" % SCRAPS_PER_WEAPON
     intro.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
     intro.offset_left = 24
     intro.offset_right = -24
@@ -108,10 +109,10 @@ func accept_scrap(item: RigidBody3D) -> bool:
         return false
     var id := contributor.get_instance_id()
     var progress: int = deposits.get(id, 0) + 1
-    deposits[id] = progress % 3
+    deposits[id] = progress % SCRAPS_PER_WEAPON
     scrap_received.emit(contributor, deposits[id])
     _update_status()
-    if progress >= 3:
+    if progress >= SCRAPS_PER_WEAPON:
         _eject_gun.call_deferred(contributor)
     return true
 
@@ -161,7 +162,7 @@ func _update_status() -> void:
             living += 1
     var ended: bool = player.dead or living == 1
     crosshair.visible = not ended and player.equipped_gun != null
-    scrap_counter.text = "Scraps: %d/3" % int(deposits.get(player.get_instance_id(), 0))
+    scrap_counter.text = "Scraps: %d/%d" % [int(deposits.get(player.get_instance_id(), 0)), SCRAPS_PER_WEAPON]
     outcome.visible = ended
     if ended:
         intro.hide()
