@@ -45,6 +45,8 @@ var dead := false
 var fire_requested := false
 var gun_pickup_grace := 0.0
 var combat: Node
+var face_material: ShaderMaterial
+var shooting_face_time := 0.0
 signal died(character: Node3D, killer: Node3D)
 @export_range(0.0, 1.0) var throw_release_fraction: float = 0.68
 @export_range(0.0, 0.5, 0.01) var carry_height_offset: float = 0.20
@@ -98,6 +100,13 @@ func _apply_colors() -> void:
             robe.set_shader_parameter("robe_texture", preload("res://GameJAM/Character/CharacterRig_Baked UVS.png"))
             robe.set_shader_parameter("robe_color", robe_color)
             mesh.material_override = robe
+        elif mesh.name == "Face":
+            face_material = ShaderMaterial.new()
+            face_material.shader = preload("res://shaders/character_face.gdshader")
+            face_material.set_shader_parameter("neutral_face", preload("res://GameJAM/Neutral Face.png"))
+            face_material.set_shader_parameter("angry_face", preload("res://GameJAM/Angry Face.png"))
+            face_material.set_shader_parameter("skin_color", skin_color)
+            mesh.material_override = face_material
         else:
             var material := StandardMaterial3D.new()
             material.roughness = 1.0
@@ -105,11 +114,20 @@ func _apply_colors() -> void:
             if mesh.name == "Hat":
                 material.albedo_texture = preload("res://GameJAM/Main Character Hat.png")
                 material.albedo_color = hat_color
-            elif mesh.name == "Face":
-                material.albedo_color = skin_color
             else:
                 material.albedo_color = Color("493326")
             mesh.material_override = material
+
+func show_shooting_face() -> void:
+    shooting_face_time = 0.3
+    if face_material != null:
+        face_material.set_shader_parameter("shooting", true)
+
+func _process(delta: float) -> void:
+    if shooting_face_time > 0:
+        shooting_face_time = maxf(0.0, shooting_face_time - delta)
+        if shooting_face_time == 0 and face_material != null:
+            face_material.set_shader_parameter("shooting", false)
 
 func _input(event: InputEvent) -> void:
     if not player_controlled:
@@ -393,7 +411,7 @@ func try_equip_gun(gun: RigidBody3D) -> bool:
     return true
 
 func _update_hand_socket() -> void:
-    if not is_instance_valid(carry_socket):
+    if not is_inside_tree() or not is_instance_valid(carry_socket) or not carry_socket.is_inside_tree() or not skeleton.is_inside_tree() or not model.is_inside_tree():
         return
     var left := skeleton.get_bone_global_pose(skeleton.find_bone("Bone.008.L")).origin
     var right := skeleton.get_bone_global_pose(skeleton.find_bone("Bone.008.R")).origin
@@ -445,8 +463,12 @@ func _release_scrap() -> void:
     var scrap := carried_scrap
     carried_scrap = null
     pickup_grace = 0.8
-    delivery_wait = 2.5
-    scrap.launch(throw_direction, velocity)
+    delivery_wait = 3.5
+    var deposit_velocity := Vector3.ZERO
+    var exchange := get_tree().get_first_node_in_group("scrap_exchange")
+    if not player_controlled and exchange != null and exchange.active:
+        deposit_velocity = exchange.get_deposit_velocity(self, scrap.global_position)
+    scrap.launch(throw_direction, velocity, deposit_velocity)
 
 func _shoot_from_camera() -> void:
     if dead or throwing or equipped_gun == null:

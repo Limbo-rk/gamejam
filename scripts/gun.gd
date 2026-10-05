@@ -14,6 +14,7 @@ var muzzle: Node3D
 var muzzle_flash: MeshInstance3D
 var muzzle_light: OmniLight3D
 var world_parent: Node
+var shot_sound: AudioStreamPlayer3D
 signal fired(rounds_left: int)
 @onready var pickup_area: Area3D = $PickupArea
 
@@ -22,6 +23,14 @@ func _ready() -> void:
     world_parent = get_parent()
     pickup_area.body_entered.connect(_try_pickup)
     _create_muzzle()
+    shot_sound = AudioStreamPlayer3D.new()
+    shot_sound.name = "ShotSound"
+    shot_sound.stream = preload("res://GameJAM/20 Gauge Single.mp3")
+    shot_sound.max_polyphony = 8
+    shot_sound.unit_size = 20.0
+    shot_sound.max_distance = 180.0
+    shot_sound.volume_db = -8.0
+    muzzle.add_child(shot_sound)
 
 func _create_muzzle() -> void:
     var visual: MeshInstance3D = $Model
@@ -69,6 +78,8 @@ func fire_at(aim_point: Vector3) -> bool:
     var shooter := equipped_by
     ammo -= 1
     shot_cooldown = SHOT_INTERVAL
+    shot_sound.play()
+    shooter.show_shooting_face()
     flash_time = 0.055
     muzzle_flash.show()
     muzzle_light.show()

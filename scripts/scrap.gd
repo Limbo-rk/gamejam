@@ -45,7 +45,7 @@ func _attach() -> void:
     if scrap_kind == "spring":
         rotation.z = PI * 0.5
 
-func launch(direction: Vector3, inherited_velocity: Vector3) -> void:
+func launch(direction: Vector3, inherited_velocity: Vector3, deposit_velocity: Vector3 = Vector3.ZERO) -> void:
     var previous_holder = held_by
     last_thrower = previous_holder
     reparent(world_parent, true)
@@ -56,6 +56,14 @@ func launch(direction: Vector3, inherited_velocity: Vector3) -> void:
     collision_layer = 4
     collision_mask = 5
     linear_velocity = direction * 10.0 + Vector3.UP * 3.0 + inherited_velocity * 0.3
+    if not deposit_velocity.is_zero_approx():
+        linear_velocity = deposit_velocity
+        # The deposit arc is calculated with gravity; avoid drag shortening it.
+        linear_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
+        linear_damp = 0.0
+    else:
+        linear_damp_mode = RigidBody3D.DAMP_MODE_COMBINE
+        linear_damp = 0.15
     angular_velocity = Vector3(2.2, 1.1, 0.4)
     thrown.emit(previous_holder)
 

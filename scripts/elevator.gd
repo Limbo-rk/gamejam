@@ -34,6 +34,11 @@ func _ready() -> void:
 	scrap_exchange.platform = platform_mesh
 	add_child(scrap_exchange)
 	add_child(preload("res://scripts/npc_scavenging.gd").new())
+	scrap_exchange.get_node("PlatformStatus").hide()
+	var start_menu := preload("res://scripts/start_menu.gd").new()
+	add_child(start_menu)
+	await start_menu.started
+	scrap_exchange.get_node("PlatformStatus").show()
 	await get_tree().create_timer(start_delay, false).timeout
 	elevator_animation.play("ElevatorRise")
 	await elevator_animation.animation_finished
